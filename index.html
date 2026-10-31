@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toronto Votes 2026</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script src="https://unpkg.com/@protomaps/basemaps@5.7.2/dist/basemaps.js"></script>
+<script src="https://unpkg.com/deck.gl@8.9.36/dist.min.js"></script>
+<style>
+  :root {
+    --surface: #1a1a19;
+    --page: #0d0d0d;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --hairline: rgba(255, 255, 255, 0.10);
+    --control: #2c2c2a;
+    --control-on: #f0efec;
+    --control-on-ink: #1a1a19;
+    --map-bg: #161615;
+    --ward-line: #4a4a46;
+    --cat-0: #8368fb;
+    --cat-1: #26a127;
+    --cat-2: #d55181;
+    color-scheme: dark;
+  }
+
+  /* MapLibre controls in the page's dark palette */
+  .maplibregl-ctrl-group { background: var(--surface); border: 1px solid var(--hairline); }
+  .maplibregl-ctrl-group button + button { border-top-color: var(--hairline); }
+  .maplibregl-ctrl-group button .maplibregl-ctrl-icon { filter: invert(1); }
+  .maplibregl-ctrl.maplibregl-ctrl-attrib, .maplibregl-ctrl-attrib.maplibregl-compact {
+    background: var(--surface); color: var(--ink-2);
+  }
+  .maplibregl-ctrl-attrib a { color: var(--ink-2); }
+  .maplibregl-ctrl-attrib-button { filter: invert(1); }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #map { position: absolute; inset: 0; background: var(--map-bg); }
+
+  .panel {
+    position: absolute; top: 16px; left: 16px; width: 320px; max-height: calc(100% - 32px);
+    overflow: auto; background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 10px; padding: 16px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08); z-index: 3;
+  }
+  h1 { font-size: 17px; margin: 0 0 2px; line-height: 1.25; }
+  .sub { color: var(--ink-2); margin: 0 0 12px; font-size: 13px; }
+  .legend { list-style: none; margin: 0 0 6px; padding: 0; }
+  .legend li { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  .legend .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .legend .label { flex: 1; }
+  .legend .val { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .scale { color: var(--ink-2); font-size: 13px; margin: 8px 0 12px; font-variant-numeric: tabular-nums; }
+  .scale strong { color: var(--ink); }
+  .icon-btn {
+    border: 0; background: var(--control); color: var(--ink); width: 36px; height: 32px;
+    border-radius: 8px; cursor: pointer; font: inherit; display: grid; place-items: center;
+  }
+  .note { color: var(--ink-2); font-size: 12px; margin: 12px 0 0; }
+  .note + .note { margin-top: 6px; }
+  .note a { color: var(--ink); }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-top: 10px; }
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); color: var(--ink);
+    border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; font-size: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); display: none; z-index: 5; min-width: 180px;
+  }
+  .tooltip table { border-collapse: collapse; width: 100%; }
+  .tooltip td { padding: 1px 0; }
+  .tooltip td.n { text-align: right; font-variant-numeric: tabular-nums; padding-left: 12px; }
+  .tooltip .h { font-weight: 600; margin-bottom: 4px; }
+  .status { position: absolute; right: 16px; bottom: 28px; color: var(--ink-2); font-size: 12px;
+    background: var(--surface); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--hairline); display: none; z-index: 3; }
+  .zoom-note {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 3;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); opacity: 0; transition: opacity 0.3s;
+    pointer-events: none; white-space: nowrap;
+  }
+  .zoom-note.show { opacity: 1; }
+  .collapse-btn { display: none; }
+
+  .pause-btn {
+    border: 0; background: var(--control); color: var(--ink); border-radius: 8px;
+    padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  .pause-btn:hover { background: var(--hairline); }
+
+  @media (max-width: 640px) {
+    .panel { top: auto; bottom: 16px; left: 16px; right: 16px; width: auto; max-height: 55%; padding: 12px; }
+    .collapse-btn { display: block; position: absolute; top: 8px; right: 8px; }
+    .maplibregl-ctrl-bottom-left { top: 0; bottom: auto; }
+    .panel.collapsed .body { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map" role="application" aria-label="Dot map of votes in Toronto's 2026 mayoral election, by poll"></div>
+
+<section class="panel" id="panel" aria-labelledby="title">
+  <button class="icon-btn collapse-btn" id="collapse" aria-label="Collapse panel" aria-expanded="true">–</button>
+  <h1 id="title">Toronto's 2026 mayoral vote</h1>
+  <p class="sub">Every vote cast, placed in the poll it came from.</p>
+  <div class="body">
+    <ul class="legend" id="legend"></ul>
+    <div class="scale" id="scale" aria-live="polite">Loading…</div>
+
+    <button class="pause-btn" id="pause" aria-pressed="false">Pause animation</button>
+
+    <p class="note"><strong>Colours are estimates.</strong> Each poll's dots match its official totals, rounded to the dot size, but nobody knows which household voted which way. So dots keep swapping colours with others in their poll.</p>
+    <details>
+      <summary>About the data</summary>
+      <p class="note">Results: City of Toronto 2026 poll-by-poll results. Advance and mail votes are only reported by ward, so they're spread over each ward's polls in proportion to election-day votes.</p>
+      <p class="note">Where dots go: each poll's voters are placed at its residential buildings in proportion to estimated citizens 18+ (2021 Census, apportioned with the StatCan National Address Register, June 2026, and adjusted for buildings occupied since 2021). Buildings are assigned to polls with the City's 2026 street index. Non-voters are not shown.</p>
+      <p class="note">Dots sit at residential addresses; buildings with several dots spread them in a spiral. Zoom is capped so individual houses can't be picked out.</p>
+      <p class="note">Sources: contains information licensed under the <a href="https://open.toronto.ca/open-data-license/">Open Government Licence – Toronto</a> (election results, street index, address points, ward boundaries). Adapted from Statistics Canada, 2021 Census of Population and National Address Register; this does not constitute an endorsement by Statistics Canada of this product (<a href="https://www.statcan.gc.ca/en/reference/licence">Statistics Canada Open Licence</a>). Basemap © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors, via <a href="https://protomaps.com">Protomaps</a>.</p>
+    </details>
+  </div>
+</section>
+<div class="tooltip" id="tooltip" role="tooltip"></div>
+<div class="status" id="status"></div>
+<div class="zoom-note" id="zoom-note" role="status" aria-live="polite"></div>
+
+<script>
+if (new URLSearchParams(location.search).has('debug')) {
+  // ?debug: collect errors and warnings in a hidden element for headless checks
+  const log = document.createElement('pre');
+  log.id = 'debug-log'; log.hidden = true; document.body.appendChild(log);
+  const add = (m) => { log.textContent += m + '\n'; };
+  window.addEventListener('error', (e) => add('error: ' + e.message + ' @' + e.lineno));
+  window.addEventListener('unhandledrejection', (e) => add('rejection: ' + (e.reason && (e.reason.stack || e.reason))));
+  const warn = console.warn.bind(console), err = console.error.bind(console);
+  console.warn = (...a) => { add('warn: ' + a.join(' ')); warn(...a); };
+  console.error = (...a) => { add('console.error: ' + a.map((x) => x && x.stack || x).join(' ')); err(...a); };
+}
+(() => {
+  'use strict';
+
+  // ---------- Theme & palette ----------
+  const CAT_LABELS = ['Olivia Chow', 'Brad Bradford', 'Other candidates'];
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const palette = () => [0, 1, 2].map((i) => css(`--cat-${i}`));
+
+  function hexToRgb(hex) {
+    const v = parseInt(hex.slice(1), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  }
+  function srgbToLinear(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  function linearToSrgb(c) { c = Math.max(0, Math.min(1, c)); return 255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055); }
+  function rgbToOklab([r8, g8, b8]) {
+    const r = srgbToLinear(r8), g = srgbToLinear(g8), b = srgbToLinear(b8);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [
+      0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+    ];
+  }
+  function oklabToRgb([L, a, b]) {
+    const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3);
+    const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3);
+    const s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * b, 3);
+    return [
+      linearToSrgb(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+      linearToSrgb(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+      linearToSrgb(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+    ];
+  }
+  let LABS = palette().map((h) => rgbToOklab(hexToRgb(h)));
+
+  // ---------- GPU colour fade (deck.gl layer extension) ----------
+  // Per dot: from-category, to-category, fade start and duration (in
+  // animation-clock seconds). The shader interpolates in OKLab, so the CPU
+  // only touches dots that swap.
+  class FadeExtension extends deck.LayerExtension {
+    getShaders() {
+      return {
+        inject: {
+          'vs:#decl': `
+            attribute float instanceFromCat;
+            attribute float instanceToCat;
+            attribute float instanceT0;
+            attribute float instanceDur;
+            uniform float uTime;
+            uniform vec3 uLab0;
+            uniform vec3 uLab1;
+            uniform vec3 uLab2;
+            vec3 catLab(float c) {
+              if (c < 0.5) return uLab0;
+              if (c < 1.5) return uLab1;
+              return uLab2;
+            }
+            float toSrgb(float c) {
+              c = clamp(c, 0.0, 1.0);
+              return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+            }
+            vec3 oklabToSrgb(vec3 c) {
+              float l = c.x + 0.3963377774 * c.y + 0.2158037573 * c.z;
+              float m = c.x - 0.1055613458 * c.y - 0.0638541728 * c.z;
+              float s = c.x - 0.0894841775 * c.y - 1.2914855480 * c.z;
+              l = l * l * l; m = m * m * m; s = s * s * s;
+              return vec3(
+                toSrgb(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+                toSrgb(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+                toSrgb(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s));
+            }
+          `,
+          'vs:DECKGL_FILTER_COLOR': `
+            float ft = clamp((uTime - instanceT0) / max(instanceDur, 0.001), 0.0, 1.0);
+            ft = ft * ft * (3.0 - 2.0 * ft);
+            color.rgb = oklabToSrgb(mix(catLab(instanceFromCat), catLab(instanceToCat), ft));
+          `,
+        },
+      };
+    }
+    initializeState() {
+      this.getAttributeManager().addInstanced({
+        instanceFromCat: { size: 1, type: 0x1401, accessor: 'getFromCat', defaultValue: 0 },
+        instanceToCat: { size: 1, type: 0x1401, accessor: 'getToCat', defaultValue: 0 },
+        instanceT0: { size: 1, accessor: 'getT0', defaultValue: 0 },
+        instanceDur: { size: 1, accessor: 'getDur', defaultValue: 1 },
+      });
+    }
+    draw(params) {
+      const p = this.props;
+      Object.assign(params.uniforms, {
+        uTime: p.fadeTime,
+        uLab0: p.labs[0], uLab1: p.labs[1], uLab2: p.labs[2],
+      });
+    }
+  }
+  FadeExtension.extensionName = 'FadeExtension';
+  const fadeExtension = new FadeExtension();
+
+  // ---------- State ----------
+  const LADDER = [1, 2, 5, 10, 25, 50];
+  const MIN_SPACING_PX = 0.8;     // keep a level until its dots are this close (px)
+  const HYSTERESIS = 0.2;         // zoom levels
+  // Level crossfade in wall-clock seconds; ?still skips it for headless
+  // screenshots
+  const LEVEL_FADE = new URLSearchParams(location.search).has('still') ? 0 : 0.35;
+  const wall = () => performance.now() / 1000;
+  const state = {
+    manifest: null, polls: null, origin: null,
+    period: 0.15,
+    paused: reducedMotion,  // reduced motion: start paused
+    clock: 0, lastFrame: performance.now(), lastTick: 0,
+    level: null,          // current k, or 'hex'
+    fading: [],           // [{level, from, opacity, start}]
+    chunks: new Map(),    // `${k}:${ward}` -> chunk
+    hexData: {},
+  };
+
+  // ---------- Map ----------
+  const map = new maplibregl.Map({
+    container: 'map',
+    style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': css('--map-bg') } }] },
+    center: [-79.395, 43.665], zoom: 12.9,
+    minZoom: 9.5, maxZoom: 14.5,    // capped: houses stay illegible
+    maxBounds: [[-79.9, 43.45], [-78.9, 44.0]],
+    attributionControl: false,
+    hash: true,
+    preserveDrawingBuffer: new URLSearchParams(location.search).has('debug'),
+  });
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
+  map.on('error', (e) => console.error('map:', e.error && (e.error.message || e.error)));
+  map.on('idle', () => {
+    window.__mapIdle = (window.__mapIdle || 0) + 1;
+    const log = document.getElementById('debug-log');
+    if (log && map.getSource('protomaps')) log.dataset.canvas = map.getCanvas().toDataURL('image/png');
+  });
+  map.dragRotate.disable(); map.touchZoomRotate.disableRotation();
+
+  let hasPmtiles = false;
+  async function buildStyle() {
+    const flavor = 'black';
+    const wardsLayers = [
+      { id: 'wards-line', type: 'line', source: 'wards',
+        paint: { 'line-color': css('--ward-line'), 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.6, 15, 1.4] } },
+    ];
+    const sources = { wards: { type: 'geojson', data: 'data/wards.geojson' } };
+    if (hasPmtiles) {
+      sources.protomaps = {
+        type: 'vector', url: 'pmtiles://' + new URL('data/toronto.pmtiles', location.href).href,
+        attribution: '<a href="https://protomaps.com">Protomaps</a> © <a href="https://openstreetmap.org">OpenStreetMap</a>',
+      };
+      const base = basemaps.layers('protomaps', basemaps.namedFlavor(flavor), { lang: 'en' })
+        .filter((l) => !/building/.test(l.id));
+      return {
+        version: 8, sources,
+        glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
+        sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${flavor}`,
+        layers: [...base.filter((l) => l.type !== 'symbol'), ...wardsLayers, ...base.filter((l) => l.type === 'symbol')],
+      };
+    }
+    return {
+      version: 8, sources,
+      layers: [{ id: 'bg', type: 'background', paint: { 'background-color': css('--map-bg') } }, ...wardsLayers],
+    };
+  }
+
+  const overlay = new deck.MapboxOverlay({ interleaved: false, layers: [], getTooltip: null });
+  map.addControl(overlay);
+
+  // ---------- Data loading ----------
+  async function loadJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(url); return r.json(); }
+
+  function pollAverageLab(row) {
+    // Expected colour of a poll: category colours mixed in OKLab by expected counts
+    const c = [row.chow, row.bradford, row.other];
+    const total = c[0] + c[1] + c[2];
+    const lab = [0, 0, 0];
+    if (total <= 0) return LABS[2].slice();
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) lab[j] += LABS[i][j] * c[i] / total;
+    return lab;
+  }
+
+  let loading = 0;
+  async function loadChunk(level, meta) {
+    const key = `${level.k}:${meta.ward}`;
+    if (state.chunks.has(key)) return state.chunks.get(key);
+    const promise = (async () => {
+      loading++; setStatus('Loading dots…');
+      const buf = await (await fetch(meta.file)).arrayBuffer().finally(() => {
+        if (--loading === 0) setStatus('');
+      });
+      const n = meta.n;
+      const pos = new Float32Array(buf, 0, 2 * n);
+      const poll = new Uint16Array(buf, 8 * n, n);
+      const cat = new Uint8Array(buf, 10 * n, n);
+      const chunk = {
+        key, k: level.k, ward: meta.ward, n, pos, poll,
+        from: Uint8Array.from(cat), to: Uint8Array.from(cat),
+        t0: new Float32Array(n), dur: new Float32Array(n).fill(1),
+        ranges: [], version: 0, data: null,
+      };
+      // Contiguous index range of each poll's dots (file is sorted by poll)
+      let s = 0;
+      for (let i = 1; i <= n; i++) {
+        if (i === n || poll[i] !== poll[s]) { chunk.ranges.push([poll[s], s, i - s]); s = i; }
+      }
+      chunk.data = makeData(chunk);
+      chunk.ready = true;
+      return chunk;
+    })();
+    state.chunks.set(key, promise);
+    const chunk = await promise;
+    state.chunks.set(key, chunk);
+    return chunk;
+  }
+  function makeData(chunk) {
+    // Fresh typed arrays for the animated attributes so deck.gl re-uploads
+    // them; position keeps its identity and is skipped
+    return {
+      length: chunk.n,
+      attributes: {
+        getPosition: { value: chunk.pos, size: 2 },
+        getFromCat: { value: chunk.from.slice(), size: 1 },
+        getToCat: { value: chunk.to.slice(), size: 1 },
+        getT0: { value: chunk.t0.slice(), size: 1 },
+        getDur: { value: chunk.dur.slice(), size: 1 },
+      },
+    };
+  }
+
+  // ---------- Level choice ----------
+  function metresPerPixel() {
+    const lat = map.getCenter().lat * Math.PI / 180;
+    return 40075016.686 * Math.cos(lat) / (512 * Math.pow(2, map.getZoom()));
+  }
+  function levelFor(mpp, slack) {
+    // Finest k whose spiral spacing clears MIN_SPACING_PX
+    for (const lv of state.manifest.levels) {
+      if (lv.spacing_m / mpp >= MIN_SPACING_PX * slack) return lv.k;
+    }
+    return 'hex';
+  }
+  function chooseLevel() {
+    const mpp = metresPerPixel();
+    const ideal = levelFor(mpp, 1);
+    const cur = state.level;
+    if (cur === null || cur === ideal) return ideal;
+    // Hysteresis: keep the current level unless the ideal one still wins
+    // after nudging the zoom by HYSTERESIS in the current level's favour
+    const idx = (l) => (l === 'hex' ? LADDER.length : LADDER.indexOf(l));
+    const nudged = levelFor(mpp * Math.pow(2, idx(ideal) < idx(cur) ? HYSTERESIS : -HYSTERESIS), 1);
+    return nudged === cur ? cur : ideal;
+  }
+
+  function visibleChunkMetas(level) {
+    const b = map.getBounds();
+    const padX = (b.getEast() - b.getWest()) * 0.25, padY = (b.getNorth() - b.getSouth()) * 0.25;
+    const [w, s, e, n] = [b.getWest() - padX, b.getSouth() - padY, b.getEast() + padX, b.getNorth() + padY];
+    return level.chunks.filter((c) => c.bbox[0] <= e && c.bbox[2] >= w && c.bbox[1] <= n && c.bbox[3] >= s);
+  }
+
+  let active = { level: null, chunks: [] };
+  async function refreshView() {
+    if (!state.manifest) return;
+    const lv = chooseLevel();
+    if (lv !== state.level) {
+      if (state.level !== null) state.fading.push({ level: state.level, chunks: active.chunks, start: wall(), opacity: 1 });
+      state.level = lv;
+      state.levelStart = wall();
+      showZoomNote();
+    }
+    updateScaleText();
+    if (lv === 'hex') { active = { level: 'hex', chunks: [] }; return; }
+    const level = state.manifest.levels.find((l) => l.k === lv);
+    const metas = visibleChunkMetas(level);
+    const chunks = await Promise.all(metas.map((m) => loadChunk(level, m)));
+    if (state.level === lv) { active = { level: lv, chunks }; render(); }
+  }
+
+  // ---------- Animation ----------
+  const rand = Math.random;
+  function stepDrift(chunk, dt) {
+    // Swap rate per poll = dots / (2 × period): each dot swaps about once a period
+    const now = state.clock, P = state.period;
+    let changed = false;
+    for (const [, start, len] of chunk.ranges) {
+      if (len < 2) continue;
+      const expected = len * dt / (2 * P);
+      let swaps = Math.floor(expected) + (rand() < expected % 1 ? 1 : 0);
+      while (swaps-- > 0) {
+        const a = start + Math.floor(rand() * len), b = start + Math.floor(rand() * len);
+        if (a === b) continue;
+        // Skip dots still mid-fade so a fade is never cut short
+        if (now < chunk.t0[a] + chunk.dur[a] || now < chunk.t0[b] + chunk.dur[b]) continue;
+        const ca = chunk.to[a], cb = chunk.to[b];
+        if (ca === cb) continue;
+        chunk.from[a] = ca; chunk.to[a] = cb; chunk.t0[a] = now; chunk.dur[a] = P * (0.6 + 0.4 * rand());
+        chunk.from[b] = cb; chunk.to[b] = ca; chunk.t0[b] = now; chunk.dur[b] = P * (0.6 + 0.4 * rand());
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  function frame(t) {
+    const dtReal = Math.min(0.25, (t - state.lastFrame) / 1000);
+    state.lastFrame = t;
+    // The animation clock stops while paused, which also freezes fades
+    if (!state.paused) state.clock += dtReal;
+
+    // CPU work several times per period (at most every frame, at least
+    // 10 Hz): swaps, then re-upload changed chunks
+    if (!state.paused && state.clock - state.lastTick >= Math.min(0.1, state.period / 4)) {
+      const dt = state.clock - state.lastTick;
+      state.lastTick = state.clock;
+      for (const chunk of active.chunks) {
+        if (stepDrift(chunk, dt)) { chunk.data = makeData(chunk); chunk.version++; }
+      }
+    }
+
+    state.fading = state.fading.filter((f) => wall() - f.start < LEVEL_FADE);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  function dotLayer(chunk, opacity) {
+    const mpp = metresPerPixel();
+    const lvl = state.manifest.levels.find((l) => l.k === chunk.k);
+    // Radius tracks the spiral's neighbour distance on screen, so dots grow
+    // as you zoom in within a level (and on to max zoom at 1:1). Dots are
+    // larger than the spacing, so towers read as solid discs and single
+    // houses stay visible.
+    const radiusPx = Math.max(1.3, Math.min(3.5, 1.25 * lvl.nn_m / mpp));
+    return new deck.ScatterplotLayer({
+      id: `dots-${chunk.key}`,
+      data: chunk.data,
+      coordinateSystem: deck.COORDINATE_SYSTEM.LNGLAT_OFFSETS,
+      coordinateOrigin: [state.origin.lon, state.origin.lat, 0],
+      radiusUnits: 'pixels', getRadius: 1, radiusScale: radiusPx,
+      getFillColor: [0, 0, 0, 255],
+      opacity: 0.9 * opacity,
+      pickable: true, autoHighlight: false,
+      extensions: [fadeExtension],
+      fadeTime: state.clock, labs: LABS,
+      chunk,
+      parameters: { depthTest: false },
+    });
+  }
+
+  function hexLayer(opacity) {
+    const z = map.getZoom();
+    const size = z < 10.6 ? 1000 : 500;
+    const data = state.hexData[size];
+    if (!data) return null;
+    return new deck.GeoJsonLayer({
+      id: `hex-${size}`,
+      data,
+      filled: true, stroked: false,
+      getFillColor: (f) => f.properties._rgba,
+      opacity,
+      pickable: true,
+      updateTriggers: { getFillColor: data._paletteVersion },
+    });
+  }
+
+  let paletteVersion = 0;
+  function colourHexes(data) {
+    const max = Math.max(...data.features.map((f) => f.properties.people));
+    for (const f of data.features) {
+      const p = f.properties;
+      const rgb = oklabToRgb(pollAverageLab(p));
+      // Opacity grows with population so empty land stays quiet
+      const a = 70 + 185 * Math.sqrt(p.people / max);
+      p._rgba = [rgb[0], rgb[1], rgb[2], a];
+    }
+    data._paletteVersion = paletteVersion;
+  }
+
+  function render() {
+    if (!state.manifest) return;
+    const layers = [];
+    const sinceSwitch = wall() - (state.levelStart ?? -10);
+    const fadeIn = LEVEL_FADE === 0 ? 1 : Math.min(1, sinceSwitch / LEVEL_FADE);
+    for (const f of state.fading) {
+      const o = LEVEL_FADE === 0 ? 0 : Math.max(0, 1 - (wall() - f.start) / LEVEL_FADE);
+      f.opacity = o;
+      if (o <= 0) continue;
+      if (f.level === 'hex') { const h = hexLayer(o); if (h) layers.push(h); }
+      else for (const c of f.chunks) layers.push(dotLayer(c, o));
+    }
+    if (state.level === 'hex') { const h = hexLayer(fadeIn); if (h) layers.push(h); }
+    else for (const c of active.chunks) layers.push(dotLayer(c, fadeIn));
+    overlay.setProps({ layers });
+  }
+
+  // ---------- Legend, controls, tooltip ----------
+  const fmt = new Intl.NumberFormat('en-CA');
+  const pct = (x) => (100 * x).toFixed(1) + '%';
+  function renderLegend() {
+    const t = state.manifest.totals;
+    const vals = [t.chow, t.bradford, t.other];
+    const voted = vals[0] + vals[1] + vals[2];
+    const pal = palette();
+    document.getElementById('legend').innerHTML = CAT_LABELS.map((label, i) => `
+      <li><span class="sw" style="background:${pal[i]}"></span>
+        <span class="label">${label}</span>
+        <span class="val">${pct(vals[i] / voted)}</span></li>`).join('');
+  }
+  const dotLabel = (k) => `1 dot = ${k} ${k === 1 ? 'voter' : 'voters'}`;
+  const hexKm = () => (map.getZoom() < 10.6 ? 1 : 0.5);
+  function updateScaleText() {
+    const el = document.getElementById('scale');
+    if (state.level === 'hex') {
+      el.innerHTML = `<strong>Zoomed out:</strong> each hexagon (${hexKm()} km across) blends the votes cast inside it; more opaque = more voters. Zoom in for dots.`;
+    } else {
+      el.innerHTML = `<strong>${dotLabel(state.level)}</strong> · zoom in for finer dots`;
+    }
+  }
+  // Brief on-map notice whenever the scale changes
+  let noteTimer = null;
+  function showZoomNote() {
+    const el = document.getElementById('zoom-note');
+    el.textContent = state.level === 'hex'
+      ? `Hexagons: each ${hexKm()} km area's votes blended`
+      : dotLabel(state.level);
+    el.classList.add('show');
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => el.classList.remove('show'), 2500);
+  }
+  function setStatus(msg) { const s = document.getElementById('status'); s.textContent = msg; s.style.display = msg ? 'block' : 'none'; }
+
+  const pauseBtn = document.getElementById('pause');
+  function setPaused(p) {
+    state.paused = p;
+    pauseBtn.textContent = p ? 'Play animation' : 'Pause animation';
+    pauseBtn.setAttribute('aria-pressed', String(p));
+  }
+  pauseBtn.addEventListener('click', () => setPaused(!state.paused));
+  setPaused(state.paused);
+
+  const collapse = document.getElementById('collapse');
+  collapse.addEventListener('click', () => {
+    const panel = document.getElementById('panel');
+    const c = panel.classList.toggle('collapsed');
+    collapse.textContent = c ? '+' : '–';
+    collapse.setAttribute('aria-expanded', String(!c));
+  });
+
+  const tooltip = document.getElementById('tooltip');
+  function showTooltip(info) {
+    if (!info.picked || !info.layer) { tooltip.style.display = 'none'; return; }
+    let rows, head;
+    if (info.layer.id.startsWith('dots-')) {
+      const chunk = info.layer.props.chunk;
+      const p = state.polls[chunk.poll[info.index]];
+      head = `Ward ${p.ward}, poll ${p.sub}`;
+      rows = [p.chow, p.bradford, p.other];
+    } else if (info.object) {
+      const p = info.object.properties;
+      head = 'This hexagon (estimated)';
+      rows = [p.chow, p.bradford, p.other];
+    } else { tooltip.style.display = 'none'; return; }
+    const voted = rows[0] + rows[1] + rows[2];
+    const pal = palette();
+    tooltip.innerHTML = `<div class="h">${head}</div><table>${CAT_LABELS.map((l, i) => `
+      <tr><td><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pal[i]};margin-right:6px"></span>${l}</td>
+      <td class="n">${fmt.format(Math.round(rows[i]))}</td>
+      <td class="n">${voted > 0 ? pct(rows[i] / voted) : ''}</td></tr>`).join('')}</table>`;
+    tooltip.style.display = 'block';
+    const pad = 14, w = tooltip.offsetWidth, h = tooltip.offsetHeight;
+    let x = info.x + pad, y = info.y + pad;
+    if (x + w > window.innerWidth) x = info.x - w - pad;
+    if (y + h > window.innerHeight) y = info.y - h - pad;
+    tooltip.style.left = x + 'px'; tooltip.style.top = y + 'px';
+  }
+  overlay.setProps({ onHover: showTooltip });
+
+
+  // ---------- Boot ----------
+  async function boot() {
+    try {
+      hasPmtiles = (await fetch('data/toronto.pmtiles', { method: 'HEAD' })).ok;
+    } catch (e) { hasPmtiles = false; }
+    if (hasPmtiles) {
+      const protocol = new pmtiles.Protocol();
+      maplibregl.addProtocol('pmtiles', protocol.tile);
+    }
+    map.setStyle(await buildStyle());
+
+    const [manifest, polls, hex500, hex1000] = await Promise.all([
+      loadJSON('data/manifest.json'), loadJSON('data/polls.json'),
+      loadJSON('data/hex_500.geojson'), loadJSON('data/hex_1000.geojson'),
+    ]);
+    state.manifest = manifest;
+    state.origin = manifest.origin;
+    const cols = polls.columns;
+    state.polls = polls.rows.map((r) => Object.fromEntries(cols.map((c, i) => [c, r[i]])));
+    state.hexData = { 500: hex500, 1000: hex1000 };
+    colourHexes(hex500); colourHexes(hex1000);
+    renderLegend();
+
+    const debugLog = document.getElementById('debug-log');
+    if (debugLog) setInterval(() => {
+      if (map.getSource('protomaps')) debugLog.dataset.canvas = map.getCanvas().toDataURL('image/jpeg', 0.7);
+      debugLog.dataset.state = JSON.stringify({
+        level: state.level, active: active.chunks.map((c) => c.key), loading, clock: +state.clock.toFixed(2),
+        fading: state.fading.length, zoom: +map.getZoom().toFixed(2),
+        style: map.getStyle().layers.length,
+        base: map.getSource('protomaps') ? {
+          loaded: map.isSourceLoaded('protomaps'),
+          earth: map.querySourceFeatures('protomaps', { sourceLayer: 'earth' }).length,
+          roads: map.querySourceFeatures('protomaps', { sourceLayer: 'roads' }).length,
+          layers: map.getStyle().layers.slice(0, 4).map((l) => [l.id, l.type, l['source-layer'], JSON.stringify(l.paint).slice(0, 80)]),
+        } : null,
+      });
+    }, 500);
+    map.on('move', () => { const lv = chooseLevel(); if (lv !== state.level) refreshView(); });
+    map.on('moveend', refreshView);
+    await refreshView();
+    requestAnimationFrame(frame);
+  }
+  map.on('load', boot);
+})();
+</script>
+</body>
+</html>
